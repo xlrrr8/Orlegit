@@ -1,0 +1,81 @@
+.bar {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .bar {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1.5px solid rgba(226, 229, 240, 0.8);
+    border-radius: 30px;
+    padding: 6px 12px;
+    width: calc(100% - 32px);
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(30, 35, 80, 0.12);
+    animation: fadeInUp 0.4s var(--ease) both;
+  }
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-decoration: none;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 6px 12px;
+  position: relative;
+  transition: all var(--duration) var(--ease);
+}
+
+.item:hover {
+  color: var(--text-primary);
+}
+
+.active {
+  color: var(--accent);
+}
+
+.active:hover {
+  color: var(--accent);
+}
+
+.accent {
+  background: var(--scam);
+  color: white !important;
+  border-radius: 20px;
+  padding: 8px 14px;
+  box-shadow: 0 4px 12px rgba(224, 49, 49, 0.2);
+}
+
+.accent:hover {
+  background: #c92a2a;
+}
+
+.dot {
+  position: absolute;
+  bottom: 0px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.icon {
+  transition: transform 0.2s var(--ease);
+}
+
+.item:active .icon {
+  transform: scale(0.9);
+}
