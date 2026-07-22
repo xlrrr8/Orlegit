@@ -31,41 +31,62 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
 
   const fetchProfile = useCallback(
     async (currentUser: User) => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", currentUser.id)
-        .single();
-      
-      if (error || !data) {
-        // Create default profile for OAuth/new users
-        const emailPrefix = currentUser.email ? currentUser.email.split("@")[0] : "user";
-        const meta = currentUser.user_metadata;
-        const fallbackUsername = meta?.full_name || meta?.name || `${emailPrefix}_${Math.random().toString(36).slice(2, 6)}`;
-        
-        const newProfile = {
-          id: currentUser.id,
-          username: fallbackUsername,
-          avatar_url: meta?.avatar_url || null,
-          trust_score: 0,
-        };
-
-        const { data: insertedData, error: insertError } = await supabase
+      try {
+        const { data, error } = await supabase
           .from("profiles")
-          .insert(newProfile)
-          .select()
+          .select("*")
+          .eq("id", currentUser.id)
           .single();
 
-        if (!insertError && insertedData) {
-          setProfile(insertedData as Profile);
+        if (error || !data) {
+          const emailPrefix = currentUser.email ? currentUser.email.split("@")[0] : "user";
+          const meta = currentUser.user_metadata;
+          const fallbackUsername = meta?.username || meta?.full_name || meta?.name || emailPrefix;
+
+          const newProfile = {
+            id: currentUser.id,
+            username: fallbackUsername,
+            avatar_url: meta?.avatar_url || null,
+            trust_score: 100,
+          };
+
+          const { data: insertedData, error: insertError } = await supabase
+            .from("profiles")
+            .insert(newProfile)
+            .select()
+            .single();
+
+          if (!insertError && insertedData) {
+            setProfile(insertedData as Profile);
+          } else {
+            const uniqueUsername = `${fallbackUsername}_${Math.floor(Math.random() * 1000)}`;
+            const retryProfile = { ...newProfile, username: uniqueUsername };
+            const { data: retryData } = await supabase
+              .from("profiles")
+              .insert(retryProfile)
+              .select()
+              .single();
+
+            if (retryData) {
+              setProfile(retryData as Profile);
+            } else {
+              setProfile({
+                ...retryProfile,
+                created_at: new Date().toISOString(),
+              } as Profile);
+            }
+          }
         } else {
-          setProfile({
-            ...newProfile,
-            created_at: new Date().toISOString(),
-          } as Profile);
+          setProfile(data as Profile);
         }
-      } else {
-        setProfile(data as Profile);
+      } catch {
+        setProfile({
+          id: currentUser.id,
+          username: currentUser.email ? currentUser.email.split("@")[0] : "user",
+          avatar_url: null,
+          trust_score: 100,
+          created_at: new Date().toISOString(),
+        } as Profile);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -73,38 +94,62 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   );
 
   const refreshProfile = useCallback(async () => {
-    if (user) await fetchProfile(user);
+    if (user) {
+      await fetchProfile(user);
+    }
   }, [user, fetchProfile]);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then((res: any) => {
-      const currentUser = res.data.session?.user ?? null;
-      setUser(currentUser);
-      if (currentUser) fetchProfile(currentUser);
-      setLoading(false);
-    });
+    let mounted = true;
 
-    // Listen for auth changes
+    async function initAuth() {
+      try {
+        const res = await supabase.auth.getSession();
+        const currentUser = res.data.session?.user ?? null;
+        if (currentUser && mounted) {
+          setUser(currentUser);
+          await fetchProfile(currentUser);
+        } else if (mounted) {
+          setUser(null);
+          setProfile(null);
+        }
+      } catch (e) {
+        console.error("Supabase session check error:", e);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    initAuth();
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
       const currentUser = session?.user ?? null;
-      setUser(currentUser);
       if (currentUser) {
+        setUser(currentUser);
         fetchProfile(currentUser);
       } else {
+        setUser(null);
         setProfile(null);
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [fetchProfile, supabase.auth]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore
+    }
     setUser(null);
     setProfile(null);
   }, [supabase.auth]);

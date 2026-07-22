@@ -18,19 +18,24 @@ export default function ReportsPage() {
     async function loadReports() {
       setLoading(true);
       const supabase = createClient();
-      const { data, error } = await supabase
-        .from("reports")
-        .select("*, profiles(username)")
-        .order("created_at", { ascending: false });
+      let loaded: any[] = [];
+      try {
+        const { data, error } = await supabase
+          .from("reports")
+          .select("*, profiles(username)")
+          .order("created_at", { ascending: false });
 
-      if (!error && data) {
-        setReports(
-          data.map((r: any) => ({
+        if (!error && data && data.length > 0) {
+          loaded = data.map((r: any) => ({
             ...r,
             username: r.profiles?.username || "anonymous",
-          }))
-        );
+          }));
+        }
+      } catch (err) {
+        console.error("Failed to load reports from Supabase:", err);
       }
+
+      setReports(loaded);
       setLoading(false);
     }
 
@@ -40,15 +45,35 @@ export default function ReportsPage() {
   // Filter & Search Logic
   const filteredReports = reports
     .filter((report) => {
-      const matchesSearch =
-        report.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        report.target.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        report.description.toLowerCase().includes(searchTerm.toLowerCase());
-      
+      const term = searchTerm.trim().toLowerCase();
       const matchesCategory =
         selectedCategory === "all" || report.category === selectedCategory;
 
-      return matchesSearch && matchesCategory;
+      if (!term) return matchesCategory;
+
+      const cleanPhoneTerm = term.replace(/[\s\-\(\)\.]/g, "");
+      const tokens = term
+        .replace(/[^a-z0-9+]/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 1);
+
+      const title = report.title.toLowerCase();
+      const target = report.target.toLowerCase();
+      const desc = report.description.toLowerCase();
+      const cat = report.category.toLowerCase();
+      const cleanTarget = target.replace(/[\s\-\(\)\.]/g, "");
+
+      const matchesKeyword =
+        tokens.length > 0
+          ? tokens.some(
+              (t) => title.includes(t) || target.includes(t) || desc.includes(t) || cat.includes(t)
+            )
+          : title.includes(term) || target.includes(term) || desc.includes(term);
+
+      const matchesPhone =
+        cleanPhoneTerm.length >= 6 && cleanTarget.includes(cleanPhoneTerm);
+
+      return (matchesKeyword || matchesPhone) && matchesCategory;
     })
     .sort((a, b) => {
       if (sortBy === "votes") {

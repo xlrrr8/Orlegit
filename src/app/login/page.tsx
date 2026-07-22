@@ -19,7 +19,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // If already logged in, redirect
+  // If already logged in, redirect to account page
   if (user) {
     router.replace("/account");
     return null;
@@ -39,47 +39,68 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
-      if (signUpError) {
-        setError(signUpError.message);
+      if (password.length < 6) {
+        setError("Password must be at least 6 characters.");
         setLoading(false);
         return;
       }
 
-      // Create profile row
-      if (data.user) {
-        const { error: profileError } = await supabase.from("profiles").insert({
-          id: data.user.id,
-          username: username.trim(),
+      try {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              username: username.trim(),
+            },
+          },
         });
 
-        if (profileError && !profileError.message.includes("duplicate")) {
-          setError("Account created but profile setup failed. Please try signing in.");
+        if (signUpError) {
+          setError(signUpError.message);
           setLoading(false);
           return;
         }
-      }
 
-      setSuccess("Account created! Redirecting…");
-      setTimeout(() => router.push("/account"), 1000);
+        if (data?.user) {
+          // Attempt to insert profile record into database
+          await supabase.from("profiles").upsert({
+            id: data.user.id,
+            username: username.trim(),
+            trust_score: 100,
+          });
+
+          if (data.session) {
+            setSuccess("Account created successfully! Redirecting…");
+            setTimeout(() => router.push("/account"), 600);
+          } else {
+            setSuccess("Account created! If required, check your email for confirmation.");
+            setTimeout(() => router.push("/account"), 1500);
+          }
+        }
+      } catch (err: any) {
+        setError(err.message || "An unexpected error occurred during signup.");
+      }
     } else {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      try {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
 
-      if (signInError) {
-        setError(signInError.message);
-        setLoading(false);
-        return;
+        if (signInError) {
+          setError(signInError.message);
+          setLoading(false);
+          return;
+        }
+
+        if (data.user) {
+          setSuccess("Signed in successfully! Redirecting…");
+          setTimeout(() => router.push("/account"), 500);
+        }
+      } catch (err: any) {
+        setError(err.message || "An unexpected error occurred during sign in.");
       }
-
-      router.push("/account");
     }
 
     setLoading(false);
@@ -90,16 +111,21 @@ export default function LoginPage() {
     setSuccess("");
     setLoading(true);
 
-    const supabase = createClient();
-    const { error: signInError } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/account`,
-      },
-    });
+    try {
+      const supabase = createClient();
+      const { error: signInError } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${window.location.origin}/account`,
+        },
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      if (signInError) {
+        setError(signInError.message);
+        setLoading(false);
+      }
+    } catch (err: any) {
+      setError(err.message || "Google sign in failed.");
       setLoading(false);
     }
   };
@@ -113,7 +139,7 @@ export default function LoginPage() {
       justifyContent: "center",
       padding: "2rem 1rem",
     }}>
-      {/* Decorative blobs */}
+      {/* Decorative background gradients */}
       <div style={{
         position: "fixed", top: "-120px", right: "-120px",
         width: "500px", height: "500px", borderRadius: "50%",
@@ -163,7 +189,7 @@ export default function LoginPage() {
               : "Join the community and help protect others"}
           </p>
 
-          {/* Error / success */}
+          {/* Error / success alerts */}
           {error && (
             <div style={{
               background: "var(--scam-dim)", border: "1.5px solid var(--scam-border)",
@@ -268,7 +294,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Submit */}
+            {/* Submit button */}
             <button
               type="submit"
               className="btn btn-primary"

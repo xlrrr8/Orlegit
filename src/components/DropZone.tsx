@@ -1,32 +1,114 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Upload, X, ImageIcon, FileImage } from "lucide-react";
+import { Upload, X, ImageIcon, FileImage, AlertTriangle } from "lucide-react";
 
 interface DropZoneProps {
   onImagesChange: (files: File[]) => void;
   maxFiles?: number;
+  /** Maximum file size in bytes. Default: 5MB */
+  maxSizeBytes?: number;
 }
 
-export default function DropZone({ onImagesChange, maxFiles = 5 }: DropZoneProps) {
+// Explicit allowlist of accepted MIME types
+const ALLOWED_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+]);
+
+// Allowed extensions (fallback check)
+const ALLOWED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+const DEFAULT_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+
+function getFileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot).toLowerCase() : "";
+}
+
+function isAllowedFile(file: File): { valid: boolean; reason?: string } {
+  // Check MIME type
+  if (!ALLOWED_MIME_TYPES.has(file.type)) {
+    const ext = getFileExtension(file.name);
+    // Fallback: check extension if MIME is generic (e.g., "application/octet-stream")
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return {
+        valid: false,
+        reason: `"${file.name}" is not an accepted image type. Use PNG, JPG, or WEBP.`,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+export default function DropZone({
+  onImagesChange,
+  maxFiles = 5,
+  maxSizeBytes = DEFAULT_MAX_SIZE,
+}: DropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [images, setImages] = useState<{ file: File; preview: string }[]>([]);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback(
     (files: FileList | null) => {
       if (!files) return;
-      const imageFiles = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      setValidationError(null);
+
+      const errors: string[] = [];
+      const validFiles: File[] = [];
+
+      for (const file of Array.from(files)) {
+        // Check file type
+        const typeCheck = isAllowedFile(file);
+        if (!typeCheck.valid) {
+          errors.push(typeCheck.reason!);
+          continue;
+        }
+
+        // Check file size
+        if (file.size > maxSizeBytes) {
+          const sizeMB = (maxSizeBytes / (1024 * 1024)).toFixed(0);
+          const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+          errors.push(
+            `"${file.name}" (${fileSizeMB}MB) exceeds the ${sizeMB}MB limit.`
+          );
+          continue;
+        }
+
+        validFiles.push(file);
+      }
+
+      if (errors.length > 0) {
+        setValidationError(errors.join(" "));
+      }
+
       const remaining = maxFiles - images.length;
-      const toAdd = imageFiles.slice(0, remaining).map((file) => ({
+      if (remaining <= 0) {
+        if (validFiles.length > 0) {
+          setValidationError(`Maximum ${maxFiles} images allowed.`);
+        }
+        return;
+      }
+
+      const toAdd = validFiles.slice(0, remaining).map((file) => ({
         file,
         preview: URL.createObjectURL(file),
       }));
       const updated = [...images, ...toAdd];
       setImages(updated);
       onImagesChange(updated.map((i) => i.file));
+
+      // Reset input so the same file can be re-selected
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
     },
-    [images, maxFiles, onImagesChange]
+    [images, maxFiles, maxSizeBytes, onImagesChange]
   );
 
   const handleDrop = useCallback(
@@ -50,7 +132,10 @@ export default function DropZone({ onImagesChange, maxFiles = 5 }: DropZoneProps
     const updated = images.filter((_, i) => i !== idx);
     setImages(updated);
     onImagesChange(updated.map((i) => i.file));
+    setValidationError(null);
   };
+
+  const maxSizeMB = (maxSizeBytes / (1024 * 1024)).toFixed(0);
 
   return (
     <div>
@@ -91,7 +176,7 @@ export default function DropZone({ onImagesChange, maxFiles = 5 }: DropZoneProps
               {isDragging ? "Drop images here" : "Drag & drop screenshots"}
             </p>
             <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: 0 }}>
-              or <span style={{ color: "var(--accent)", fontWeight: 500 }}>click to browse</span> · PNG, JPG, WEBP · up to {maxFiles} images
+              or <span style={{ color: "var(--accent)", fontWeight: 500 }}>click to browse</span> · PNG, JPG, WEBP · max {maxSizeMB}MB each · up to {maxFiles} images
             </p>
           </div>
         ) : (
@@ -107,11 +192,26 @@ export default function DropZone({ onImagesChange, maxFiles = 5 }: DropZoneProps
         )}
       </div>
 
-      {/* Hidden input */}
+      {/* Validation error */}
+      {validationError && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: "0.4rem",
+          marginTop: "0.5rem", padding: "0.5rem 0.75rem",
+          background: "var(--scam-dim)", border: "1px solid var(--scam-border)",
+          borderRadius: "var(--radius-md)",
+        }}>
+          <AlertTriangle size={13} strokeWidth={2} color="var(--scam)" style={{ flexShrink: 0, marginTop: "0.1rem" }} />
+          <p style={{ fontSize: "0.75rem", color: "var(--scam)", margin: 0 }}>
+            {validationError}
+          </p>
+        </div>
+      )}
+
+      {/* Hidden input — explicit accept attribute for browser file picker */}
       <input
         ref={inputRef}
         type="file"
-        accept="image/*"
+        accept=".png,.jpg,.jpeg,.webp"
         multiple
         style={{ display: "none" }}
         onChange={(e) => addFiles(e.target.files)}

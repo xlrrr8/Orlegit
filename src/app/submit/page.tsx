@@ -2,13 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Flag, Bot, CheckCircle2, ArrowRight, Loader, ImageIcon } from "lucide-react";
+import { Flag, Bot, CheckCircle2, ArrowRight, Loader, ImageIcon, AlertTriangle } from "lucide-react";
 import { CATEGORIES } from "@/lib/mockData";
 import AIVerdict from "@/components/AIVerdict";
 import DropZone from "@/components/DropZone";
 import { createClient } from "@/lib/supabase";
 import type { AIAnalysisResult } from "@/lib/gemini";
-import type { Verdict } from "@/lib/mockData";
 
 export default function SubmitPage() {
   const router = useRouter();
@@ -22,6 +21,8 @@ export default function SubmitPage() {
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [duplicateCount, setDuplicateCount] = useState(0);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -37,56 +38,89 @@ export default function SubmitPage() {
 
     setLoading(true);
     setAnalysis(null);
+    setError(null);
 
     const supabase = createClient();
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id || null;
 
     try {
+      // 1. Insert report with ONLY user-supplied fields.
+      //    AI columns (ai_verdict, ai_confidence, ai_reasoning) are left
+      //    at their DB defaults and will be updated server-side by /api/analyze.
+      const { data: insertedReport, error: insertError } = await supabase
+        .from("reports")
+        .insert({
+          title: form.title,
+          target: form.target,
+          category: form.category,
+          description: form.description,
+          user_id: userId,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        throw new Error(insertError.message);
+      }
+
+      const reportId = insertedReport?.id;
+
+      // 2. Call /api/analyze with the report_id so the server writes AI columns
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          report_id: reportId,
+        }),
       });
+
+      if (res.status === 429) {
+        const rateLimitData = await res.json();
+        setError(
+          `Too many submissions. Please wait ${rateLimitData.retry_after_seconds || 60} seconds before trying again.`
+        );
+        setLoading(false);
+        return;
+      }
+
       const data: AIAnalysisResult = await res.json();
-
-      // Write to live Supabase reports table
-      await supabase.from("reports").insert({
-        title: form.title,
-        target: form.target,
-        category: form.category,
-        description: form.description,
-        ai_verdict: data.verdict,
-        ai_confidence: data.confidence,
-        ai_reasoning: data.reasoning,
-        user_id: userId,
-      });
-
       setAnalysis(data);
       setSubmitted(true);
     } catch (err) {
-      const fallbackAnalysis: AIAnalysisResult = {
-        verdict: "UNCERTAIN" as Verdict,
-        confidence: 60,
-        reasoning: "Could not reach AI service. Your report has been saved for manual review.",
+      console.error("Submission error:", err);
+      // Report may have been inserted but AI analysis failed.
+      // Show the user a fallback message.
+      setAnalysis({
+        verdict: "UNCERTAIN",
+        confidence: 50,
+        reasoning:
+          "Could not reach AI service. Your report has been saved and will be analyzed later.",
         red_flags: [],
-      };
-
-      await supabase.from("reports").insert({
-        title: form.title,
-        target: form.target,
-        category: form.category,
-        description: form.description,
-        ai_verdict: fallbackAnalysis.verdict,
-        ai_confidence: fallbackAnalysis.confidence,
-        ai_reasoning: fallbackAnalysis.reasoning,
-        user_id: userId,
       });
-
-      setAnalysis(fallbackAnalysis);
       setSubmitted(true);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Check for duplicate targets when the target field loses focus
+  const checkDuplicates = async () => {
+    const targetVal = form.target.trim();
+    if (!targetVal || targetVal.length < 3) {
+      setDuplicateCount(0);
+      return;
+    }
+    try {
+      const supabase = createClient();
+      const { count } = await supabase
+        .from("reports")
+        .select("id", { count: "exact", head: true })
+        .ilike("target", `%${targetVal}%`);
+      setDuplicateCount(count || 0);
+    } catch {
+      setDuplicateCount(0);
     }
   };
 
@@ -125,6 +159,7 @@ export default function SubmitPage() {
                 setSubmitted(false);
                 setAnalysis(null);
                 setEvidenceFiles([]);
+                setDuplicateCount(0);
                 setForm({ title: "", target: "", category: "phishing", description: "" });
               }}
             >
@@ -187,6 +222,21 @@ export default function SubmitPage() {
           </div>
         </div>
 
+        {/* Rate limit / error banner */}
+        {error && (
+          <div style={{
+            background: "var(--scam-dim)", border: "1.5px solid var(--scam-border)",
+            borderRadius: "var(--radius-lg)", padding: "0.875rem 1.125rem",
+            marginBottom: "1.5rem", display: "flex", alignItems: "center", gap: "0.75rem",
+            animation: "fadeInUp 0.3s ease both",
+          }}>
+            <AlertTriangle size={16} strokeWidth={1.75} color="var(--scam)" />
+            <p style={{ fontSize: "0.82rem", color: "var(--scam)", margin: 0, fontWeight: 500 }}>
+              {error}
+            </p>
+          </div>
+        )}
+
         {/* Form */}
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1.25rem", animation: "fadeInUp 0.4s 0.15s ease both" }}>
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
@@ -207,8 +257,18 @@ export default function SubmitPage() {
                 id="target" name="target" className="form-input"
                 placeholder="e.g. https://fake-site.tk or +91 98765 43210"
                 value={form.target} onChange={handleChange} required
+                onBlur={checkDuplicates}
                 suppressHydrationWarning
               />
+              {duplicateCount > 0 && (
+                <p style={{
+                  fontSize: "0.78rem", color: "var(--uncertain)", fontWeight: 500,
+                  marginTop: "0.4rem", display: "flex", alignItems: "center", gap: "0.3rem",
+                }}>
+                  <AlertTriangle size={12} strokeWidth={2} />
+                  {duplicateCount} other {duplicateCount === 1 ? "report has" : "reports have"} been filed about a similar target
+                </p>
+              )}
             </div>
 
             <div className="form-group">

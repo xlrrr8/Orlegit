@@ -4,45 +4,62 @@ import ReportCard from "@/components/ReportCard";
 import PostCard from "@/components/PostCard";
 import { createClient } from "@/lib/supabase";
 import { MOCK_COMMUNITY_POSTS } from "@/lib/communityData";
+import { MOCK_REPORTS, MOCK_STATS } from "@/lib/mockData";
 
 export default async function HomePage() {
   const supabase = createClient();
+  let totalReports: number | null = null;
+  let scamsVerified: number | null = null;
+  let genuineVerified: number | null = null;
+  let rawReports: any[] | null = null;
 
-  // Fetch real statistics
-  const { count: totalReports } = await supabase
-    .from("reports")
-    .select("*", { count: "exact", head: true });
+  try {
+    const resTotal = await supabase
+      .from("reports")
+      .select("*", { count: "exact", head: true });
+    totalReports = resTotal.count;
 
-  const { count: scamsVerified } = await supabase
-    .from("reports")
-    .select("*", { count: "exact", head: true })
-    .eq("ai_verdict", "LIKELY_SCAM");
+    const resScams = await supabase
+      .from("reports")
+      .select("*", { count: "exact", head: true })
+      .eq("ai_verdict", "LIKELY_SCAM");
+    scamsVerified = resScams.count;
 
-  const { count: genuineVerified } = await supabase
-    .from("reports")
-    .select("*", { count: "exact", head: true })
-    .eq("ai_verdict", "LIKELY_GENUINE");
+    const resGenuine = await supabase
+      .from("reports")
+      .select("*", { count: "exact", head: true })
+      .eq("ai_verdict", "LIKELY_GENUINE");
+    genuineVerified = resGenuine.count;
 
-  const stats = {
-    totalReports: totalReports || 0,
-    scamsVerified: scamsVerified || 0,
-    genuineVerified: genuineVerified || 0,
-    usersProtected: (scamsVerified || 0) * 18 + 120, // Extrapolation
-    todayReports: Math.max(1, Math.round((totalReports || 0) * 0.05)),
-  };
+    const resReports = await supabase
+      .from("reports")
+      .select("*, profiles(username)")
+      .eq("ai_verdict", "LIKELY_SCAM")
+      .order("created_at", { ascending: false })
+      .limit(3);
+    rawReports = resReports.data;
+  } catch (err) {
+    console.error("Supabase home page query error:", err);
+  }
 
-  // Fetch recent verified scams
-  const { data: rawReports } = await supabase
-    .from("reports")
-    .select("*, profiles(username)")
-    .eq("ai_verdict", "LIKELY_SCAM")
-    .order("created_at", { ascending: false })
-    .limit(3);
+  const hasSupabaseStats = Boolean(totalReports && totalReports > 0);
+  const stats = hasSupabaseStats
+    ? {
+        totalReports: totalReports || 0,
+        scamsVerified: scamsVerified || 0,
+        genuineVerified: genuineVerified || 0,
+        usersProtected: (scamsVerified || 0) * 18 + 120,
+        todayReports: Math.max(1, Math.round((totalReports || 0) * 0.05)),
+      }
+    : MOCK_STATS;
 
-  const featuredReports = (rawReports || []).map((r: any) => ({
-    ...r,
-    username: r.profiles?.username || "anonymous",
-  }));
+  const featuredReports =
+    rawReports && rawReports.length > 0
+      ? rawReports.map((r: any) => ({
+          ...r,
+          username: r.profiles?.username || "anonymous",
+        }))
+      : MOCK_REPORTS.filter((r) => r.ai_verdict === "LIKELY_SCAM").slice(0, 3);
 
 
   return (
