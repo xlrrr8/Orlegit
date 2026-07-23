@@ -67,11 +67,21 @@ function SearchContent() {
         req = req.eq("category", catFilter);
       }
 
-      if (tokens.length > 0) {
-        const orConditions = tokens
-          .map((t) => `title.ilike.%${t}%,target.ilike.%${t}%,description.ilike.%${t}%,category.ilike.%${t}%`)
-          .join(",");
-        req = req.or(orConditions);
+      if (q) {
+        const cleanQ = q.toLowerCase().replace(/[\s\-\(\)\.]/g, "");
+        const conditions: string[] = [
+          `title.ilike.%${q}%`,
+          `target.ilike.%${q}%`,
+          `description.ilike.%${q}%`,
+        ];
+        if (cleanQ) {
+          conditions.push(`target_normalized.ilike.%${cleanQ}%`);
+        }
+        for (const t of tokens) {
+          conditions.push(`title.ilike.%${t}%`, `target.ilike.%${t}%`, `description.ilike.%${t}%`);
+        }
+
+        req = req.or(conditions.join(","));
       }
 
       const { data, error } = await req;

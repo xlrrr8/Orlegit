@@ -9,6 +9,7 @@ export interface Profile {
   username: string;
   avatar_url: string | null;
   trust_score: number;
+  role: "user" | "moderator" | "admin";
   created_at: string;
 }
 
@@ -43,41 +44,51 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
           const meta = currentUser.user_metadata;
           const fallbackUsername = meta?.username || meta?.full_name || meta?.name || emailPrefix;
 
-          const newProfile = {
+          const baseProfile = {
             id: currentUser.id,
             username: fallbackUsername,
             avatar_url: meta?.avatar_url || null,
             trust_score: 100,
           };
 
-          const { data: insertedData, error: insertError } = await supabase
+          // First attempt: insert with role
+          let { data: insertedData, error: insertError } = await supabase
             .from("profiles")
-            .insert(newProfile)
+            .insert({ ...baseProfile, role: "user" })
             .select()
             .single();
 
-          if (!insertError && insertedData) {
-            setProfile(insertedData as Profile);
-          } else {
+          // Second attempt: if failed (e.g. role column missing in DB or username conflict), try without role or with unique username
+          if (insertError) {
             const uniqueUsername = `${fallbackUsername}_${Math.floor(Math.random() * 1000)}`;
-            const retryProfile = { ...newProfile, username: uniqueUsername };
-            const { data: retryData } = await supabase
+            
+            // Try without role field (in case migration 003 hasn't been run yet)
+            const { data: noRoleData, error: noRoleError } = await supabase
               .from("profiles")
-              .insert(retryProfile)
+              .insert({ ...baseProfile, username: uniqueUsername })
               .select()
               .single();
 
-            if (retryData) {
-              setProfile(retryData as Profile);
-            } else {
-              setProfile({
-                ...retryProfile,
-                created_at: new Date().toISOString(),
-              } as Profile);
+            if (!noRoleError && noRoleData) {
+              insertedData = noRoleData;
+              insertError = null;
             }
           }
+
+          if (!insertError && insertedData) {
+            setProfile({ role: "user", ...insertedData } as Profile);
+          } else {
+            setProfile({
+              id: currentUser.id,
+              username: fallbackUsername,
+              avatar_url: meta?.avatar_url || null,
+              trust_score: 100,
+              role: "user",
+              created_at: new Date().toISOString(),
+            } as Profile);
+          }
         } else {
-          setProfile(data as Profile);
+          setProfile({ role: "user", ...data } as Profile);
         }
       } catch {
         setProfile({
@@ -85,6 +96,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
           username: currentUser.email ? currentUser.email.split("@")[0] : "user",
           avatar_url: null,
           trust_score: 100,
+          role: "user",
           created_at: new Date().toISOString(),
         } as Profile);
       }

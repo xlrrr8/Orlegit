@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
-import { ShieldCheck, Menu, X, Flag, User, LogOut, ChevronDown } from "lucide-react";
+import { ShieldCheck, Menu, X, Flag, User, LogOut, ChevronDown, Shield } from "lucide-react";
 import { useAuth } from "@/lib/useAuth";
 import styles from "./Navbar.module.css";
 
@@ -45,6 +45,12 @@ export default function Navbar() {
           <Link href="/search" className={styles.link} onClick={() => setMobileOpen(false)}>
             Search
           </Link>
+          {!loading && profile && ["moderator", "admin"].includes(profile.role) && (
+            <Link href="/moderate" className={styles.link} onClick={() => setMobileOpen(false)} style={{ display: "flex", alignItems: "center", gap: "0.3rem", color: "var(--accent)" }}>
+              <Shield size={13} strokeWidth={2} />
+              Moderate
+            </Link>
+          )}
           <Link href="/submit" className={`btn btn-danger btn-sm ${styles.ctaBtn}`} onClick={() => setMobileOpen(false)}>
             <Flag size={13} strokeWidth={2} />
             Report

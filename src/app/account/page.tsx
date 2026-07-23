@@ -20,9 +20,52 @@ export default function AccountPage() {
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Real user reports & posts state
+  const [myReports, setMyReports] = useState<any[]>([]);
+  const [postCount, setPostCount] = useState<number>(0);
+  const [dataLoading, setDataLoading] = useState(true);
+
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login");
+      return;
+    }
+
+    async function loadUserData() {
+      if (!user) return;
+      setDataLoading(true);
+      const supabase = createClient();
+
+      try {
+        // Fetch reports filed by user
+        const { data: reportsData } = await supabase
+          .from("reports")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false });
+
+        if (reportsData) {
+          setMyReports(reportsData);
+        }
+
+        // Fetch count of posts by user
+        const { count } = await supabase
+          .from("posts")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", user.id);
+
+        if (count !== null) {
+          setPostCount(count);
+        }
+      } catch (err) {
+        console.error("Error loading user account data:", err);
+      } finally {
+        setDataLoading(false);
+      }
+    }
+
+    if (user) {
+      loadUserData();
     }
   }, [loading, user, router]);
 
@@ -208,9 +251,9 @@ export default function AccountPage() {
           marginBottom: "1.5rem", animation: "fadeInUp 0.4s 0.1s ease both",
         }}>
           {[
-            { icon: <Shield size={18} strokeWidth={1.75} />, label: "Trust Score", value: profile?.trust_score?.toString() || "0", color: "var(--accent)" },
-            { icon: <FileText size={18} strokeWidth={1.75} />, label: "Reports", value: "0", color: "var(--scam)" },
-            { icon: <MessageCircle size={18} strokeWidth={1.75} />, label: "Posts", value: "0", color: "var(--genuine)" },
+            { icon: <Shield size={18} strokeWidth={1.75} />, label: "Trust Score", value: (profile?.trust_score ?? 100).toString(), color: "var(--accent)" },
+            { icon: <FileText size={18} strokeWidth={1.75} />, label: "Reports Filed", value: dataLoading ? "..." : myReports.length.toString(), color: "var(--scam)" },
+            { icon: <MessageCircle size={18} strokeWidth={1.75} />, label: "Community Posts", value: dataLoading ? "..." : postCount.toString(), color: "var(--genuine)" },
           ].map((stat) => (
             <div key={stat.label} style={{
               background: "var(--bg-surface)", border: "1.5px solid var(--border)",
@@ -228,6 +271,89 @@ export default function AccountPage() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* My Filed Reports Section */}
+        <div style={{
+          background: "var(--bg-surface)", border: "1.5px solid var(--border)",
+          borderRadius: "var(--radius-xl)", padding: "1.5rem",
+          boxShadow: "var(--shadow-card)", marginBottom: "1.5rem",
+          animation: "fadeInUp 0.4s 0.15s ease both",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
+            <h3 style={{ fontSize: "1rem", margin: 0, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+              <FileText size={16} strokeWidth={1.75} color="var(--scam)" />
+              My Filed Reports ({myReports.length})
+            </h3>
+            <Link href="/submit" className="btn btn-primary btn-sm" style={{ fontSize: "0.75rem", padding: "0.3rem 0.75rem" }}>
+              + Report Scam
+            </Link>
+          </div>
+
+          {dataLoading ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <div className="skeleton" style={{ height: "60px", borderRadius: "var(--radius-md)" }} />
+              <div className="skeleton" style={{ height: "60px", borderRadius: "var(--radius-md)" }} />
+            </div>
+          ) : myReports.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2rem 1rem", color: "var(--text-muted)" }}>
+              <p style={{ fontSize: "0.85rem", marginBottom: "0.75rem" }}>You haven&apos;t filed any scam reports yet.</p>
+              <Link href="/submit" className="btn btn-ghost btn-sm" style={{ fontSize: "0.8rem" }}>
+                Submit a report now
+              </Link>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+              {myReports.map((report) => {
+                const isScam = report.ai_verdict === "LIKELY_SCAM";
+                const isGenuine = report.ai_verdict === "LIKELY_GENUINE";
+                const badgeBg = isScam ? "var(--scam-dim)" : isGenuine ? "var(--genuine-dim)" : "var(--uncertain-dim)";
+                const badgeColor = isScam ? "var(--scam)" : isGenuine ? "var(--genuine)" : "var(--uncertain)";
+                const badgeBorder = isScam ? "var(--scam-border)" : isGenuine ? "var(--genuine-border)" : "var(--uncertain-border)";
+
+                return (
+                  <Link
+                    key={report.id}
+                    href={`/reports/${report.id}`}
+                    style={{ textDecoration: "none" }}
+                  >
+                    <div style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem",
+                      padding: "0.875rem 1rem", background: "var(--bg-base)",
+                      borderRadius: "var(--radius-md)", border: "1.5px solid var(--border)",
+                      transition: "all 0.15s ease",
+                    }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border-accent)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--border)"; }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
+                          <span style={{
+                            padding: "0.1rem 0.5rem", borderRadius: "999px",
+                            fontSize: "0.65rem", fontWeight: 700,
+                            background: badgeBg, color: badgeColor, border: `1px solid ${badgeBorder}`,
+                            textTransform: "uppercase",
+                          }}>
+                            {report.ai_verdict ? report.ai_verdict.replace("_", " ") : "PENDING"}
+                          </span>
+                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+                            {new Date(report.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-primary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {report.title}
+                        </p>
+                        <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: "0.15rem 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          Target: <code style={{ fontSize: "0.72rem" }}>{report.target}</code>
+                        </p>
+                      </div>
+                      <ChevronRight size={16} strokeWidth={1.75} color="var(--text-muted)" />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Quick links */}

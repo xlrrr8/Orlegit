@@ -8,6 +8,15 @@ interface DropZoneProps {
   maxFiles?: number;
   /** Maximum file size in bytes. Default: 5MB */
   maxSizeBytes?: number;
+  /**
+   * When true, files are uploaded to Supabase Storage via /api/upload.
+   * Requires accessToken to be set. Falls back to local-only preview if not set.
+   */
+  uploadToStorage?: boolean;
+  /** Supabase access token for authenticated uploads */
+  accessToken?: string;
+  /** Called after each successful storage upload with the signed URL */
+  onUploadComplete?: (url: string, path: string) => void;
 }
 
 // Explicit allowlist of accepted MIME types
@@ -48,9 +57,12 @@ export default function DropZone({
   onImagesChange,
   maxFiles = 5,
   maxSizeBytes = DEFAULT_MAX_SIZE,
+  uploadToStorage = false,
+  accessToken,
+  onUploadComplete,
 }: DropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [images, setImages] = useState<{ file: File; preview: string }[]>([]);
+  const [images, setImages] = useState<{ file: File; preview: string; uploading?: boolean; uploaded?: boolean }[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -98,10 +110,43 @@ export default function DropZone({
       const toAdd = validFiles.slice(0, remaining).map((file) => ({
         file,
         preview: URL.createObjectURL(file),
+        uploading: uploadToStorage && !!accessToken,
+        uploaded: false,
       }));
       const updated = [...images, ...toAdd];
       setImages(updated);
       onImagesChange(updated.map((i) => i.file));
+
+      // Upload to Supabase Storage if configured
+      if (uploadToStorage && accessToken) {
+        toAdd.forEach(async (item, idx) => {
+          const formData = new FormData();
+          formData.append("file", item.file);
+          try {
+            const res = await fetch("/api/upload", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${accessToken}` },
+              body: formData,
+            });
+            const data = await res.json();
+            if (res.ok && data.url) {
+              onUploadComplete?.(data.url, data.path);
+              setImages((prev) => prev.map((img, i) =>
+                img.file === item.file ? { ...img, uploading: false, uploaded: true } : img
+              ));
+            } else {
+              setImages((prev) => prev.map((img) =>
+                img.file === item.file ? { ...img, uploading: false } : img
+              ));
+              if (data.error) setValidationError(`Upload failed: ${data.error}`);
+            }
+          } catch {
+            setImages((prev) => prev.map((img) =>
+              img.file === item.file ? { ...img, uploading: false } : img
+            ));
+          }
+        });
+      }
 
       // Reset input so the same file can be re-selected
       if (inputRef.current) {

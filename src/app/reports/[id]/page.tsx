@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { Flag, CheckCircle2, AlertTriangle, Share2, ChevronRight, User, Clock, MessageSquare, Loader, ShieldAlert, Info, X } from "lucide-react";
 import { categoryInfo, timeAgo, getScamScore } from "@/lib/mockData";
 import AIVerdict from "@/components/AIVerdict";
-import VoteBar from "@/components/VoteBar";
+import VoteButtons from "@/components/VoteButtons";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 
@@ -28,8 +28,7 @@ export default function ReportPage({ params }: Props) {
   const [loading, setLoading] = useState(true);
   const [newComment, setNewComment] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [voted, setVoted] = useState<"scam" | "genuine" | null>(null);
-  const [voting, setVoting] = useState(false);
+  const [userVote, setUserVote] = useState<"scam" | "genuine" | null>(null);
   const [relatedCount, setRelatedCount] = useState(0);
 
   // Dispute form state
@@ -83,7 +82,7 @@ export default function ReportPage({ params }: Props) {
             .single();
 
           if (existingVote) {
-            setVoted(existingVote.vote as "scam" | "genuine");
+            setUserVote(existingVote.vote as "scam" | "genuine");
           }
         }
       } catch {
@@ -129,65 +128,8 @@ export default function ReportPage({ params }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const handleVote = async (voteType: "scam" | "genuine") => {
-    if (voted || voting || !report) return;
-    setVoting(true);
-
-    try {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData?.user?.id;
-
-      if (!userId) {
-        alert("Please sign in to vote.");
-        setVoting(false);
-        return;
-      }
-
-      // Insert vote — unique constraint will prevent duplicates
-      const { error: voteError } = await supabase.from("votes").insert({
-        user_id: userId,
-        report_id: id,
-        vote: voteType,
-      });
-
-      if (voteError) {
-        if (voteError.code === "23505") {
-          // Unique violation — already voted
-          setVoted(voteType);
-        } else {
-          console.error("Vote insert failed:", voteError.message);
-        }
-        setVoting(false);
-        return;
-      }
-
-      // Increment counters on reports table
-      const isScam = voteType === "scam";
-      const scamVotes = report.community_scam_votes + (isScam ? 1 : 0);
-      const genuineVotes = report.community_genuine_votes + (isScam ? 0 : 1);
-
-      const { error } = await supabase
-        .from("reports")
-        .update({
-          community_scam_votes: scamVotes,
-          community_genuine_votes: genuineVotes,
-        })
-        .eq("id", id);
-
-      if (!error) {
-        setReport({
-          ...report,
-          community_scam_votes: scamVotes,
-          community_genuine_votes: genuineVotes,
-        });
-        setVoted(voteType);
-      }
-    } catch (err) {
-      console.error("Voting failed:", err);
-    } finally {
-      setVoting(false);
-    }
-  };
+  // Vote handling is now in VoteButtons component.
+  // The fn_update_vote_counts() DB trigger atomically updates counters on INSERT.
 
   const handleCommentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -385,64 +327,13 @@ export default function ReportPage({ params }: Props) {
               borderRadius: "var(--radius-xl)", padding: "1.75rem", boxShadow: "var(--shadow-card)",
             }}>
               <h3 style={{ marginBottom: "1.25rem", fontSize: "1rem" }}>Community verdict</h3>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem" }}>
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: "1.75rem", fontWeight: 600, color: "var(--scam)" }}>
-                    {report.community_scam_votes}
-                  </div>
-                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Scam votes</div>
-                </div>
-                <div style={{ textAlign: "center", alignSelf: "center" }}>
-                  <div style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>{totalVotes} total</div>
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <div style={{ fontSize: "1.75rem", fontWeight: 600, color: "var(--genuine)" }}>
-                    {report.community_genuine_votes}
-                  </div>
-                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Genuine votes</div>
-                </div>
-              </div>
-              <VoteBar scam={report.community_scam_votes} genuine={report.community_genuine_votes} />
-              <p style={{ textAlign: "center", marginTop: "0.5rem", fontSize: "0.78rem", color: "var(--text-muted)" }}>
-                {scamPct}% believe this is a scam
-              </p>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.875rem", marginTop: "1.25rem" }}>
-                <button
-                  onClick={() => handleVote("scam")}
-                  disabled={!!voted || voting}
-                  className="btn btn-danger btn-sm"
-                  style={{
-                    justifyContent: "center",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.4rem",
-                    opacity: voted === "genuine" ? 0.5 : 1,
-                    transform: voted === "scam" ? "scale(1.03)" : "none",
-                  }}
-                >
-                  <AlertTriangle size={13} strokeWidth={2} />
-                  {voted === "scam" ? "Voted Scam" : "Scam"}
-                </button>
-                <button
-                  onClick={() => handleVote("genuine")}
-                  disabled={!!voted || voting}
-                  className="btn btn-ghost btn-sm"
-                  style={{
-                    borderColor: "var(--genuine-border)",
-                    color: "var(--genuine)",
-                    justifyContent: "center",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.4rem",
-                    opacity: voted === "scam" ? 0.5 : 1,
-                    transform: voted === "genuine" ? "scale(1.03)" : "none",
-                  }}
-                >
-                  <CheckCircle2 size={13} strokeWidth={2} />
-                  {voted === "genuine" ? "Voted Genuine" : "Genuine"}
-                </button>
-              </div>
+              <VoteButtons
+                reportId={report.id}
+                initialScamVotes={report.community_scam_votes}
+                initialGenuineVotes={report.community_genuine_votes}
+                userVote={userVote}
+                votingEnabled={report.status !== "REMOVED"}
+              />
             </div>
 
             {/* Comments */}

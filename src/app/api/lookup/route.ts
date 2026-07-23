@@ -1,155 +1,111 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
-import { checkRateLimit, getClientIP, RATE_LIMITS } from "@/lib/rateLimit";
+import { createClient } from "@supabase/supabase-js";
+import { checkRateLimitAsync } from "@/lib/rateLimitRedis";
+import { getClientIP, RATE_LIMITS } from "@/lib/rateLimit";
 
 /**
- * Public read API for checking if a target has been reported.
+ * GET /api/lookup?q=<query>
  *
- * GET /api/lookup?target=example.com
+ * Public endpoint: aggregates report data for a given target/query.
+ * Uses the ANON client (not service role) — RLS already grants SELECT access.
+ * Rate limited by IP (public), with future API-key tier for partners.
  *
- * Returns aggregate data about reports for the given target.
- * Rate limited: 60 requests per minute per IP.
+ * Spec: Phase 7
  */
 export async function GET(req: NextRequest) {
-  // CORS headers for third-party integration
-  const headers = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Cache-Control": "public, max-age=60", // Cache for 1 minute
-  };
+  const { searchParams } = new URL(req.url);
+  const query = searchParams.get("q")?.trim();
 
-  // Rate limiting
+  if (!query || query.length < 2) {
+    return NextResponse.json(
+      { error: "Query parameter 'q' is required (min 2 chars)" },
+      { status: 400 }
+    );
+  }
+
+  // Rate limit by IP for public access
   const clientIP = getClientIP(req);
-  const rateLimitResult = checkRateLimit(
-    `lookup:${clientIP}`,
-    RATE_LIMITS.lookup
-  );
+
+  // Check for API key header for partner tier (higher limit)
+  const apiKey = req.headers.get("x-api-key");
+  const rateLimitKey = apiKey
+    ? `lookup:key:${apiKey}`
+    : `lookup:ip:${clientIP}`;
+
+  const config = apiKey
+    ? { maxRequests: 600, windowMs: 60 * 1000 }  // Partner: 600/min
+    : RATE_LIMITS.lookup;                          // Public: 60/min
+
+  const rateLimitResult = await checkRateLimitAsync(rateLimitKey, config);
 
   if (!rateLimitResult.allowed) {
-    const retryAfterSecs = Math.ceil(
-      (rateLimitResult.retryAfterMs || 60000) / 1000
-    );
+    const retryAfterSecs = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
     return NextResponse.json(
-      { error: "Rate limit exceeded", retry_after_seconds: retryAfterSecs },
+      { error: "Rate limit exceeded" },
       {
         status: 429,
         headers: {
-          ...headers,
           "Retry-After": String(retryAfterSecs),
+          "X-RateLimit-Remaining": "0",
         },
       }
     );
   }
 
-  const { searchParams } = new URL(req.url);
-  const target = searchParams.get("target");
-
-  if (!target || target.trim().length < 3) {
-    return NextResponse.json(
-      { error: "Query parameter 'target' is required (min 3 characters)" },
-      { status: 400, headers }
-    );
-  }
+  // Use ANON client — not service role. RLS already permits these SELECTs.
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
   try {
-    const supabase = createServiceClient();
-
-    // Search by target (case-insensitive, substring match)
     const { data: reports, error } = await supabase
       .from("reports")
       .select(
-        "id, title, target, category, ai_verdict, ai_confidence, community_scam_votes, community_genuine_votes, status, created_at"
+        "id, title, target, category, ai_verdict, ai_confidence, ai_reasoning, ai_red_flags, " +
+        "community_scam_votes, community_genuine_votes, status, created_at"
       )
-      .ilike("target", `%${target.trim()}%`)
+      .or(`target.ilike.%${query}%,title.ilike.%${query}%,target_normalized.ilike.%${query.toLowerCase()}%`)
+      .neq("status", "REMOVED")
       .order("created_at", { ascending: false })
       .limit(20);
 
     if (error) {
       console.error("[/api/lookup] Supabase error:", error.message);
-      return NextResponse.json(
-        { error: "Internal error" },
-        { status: 500, headers }
-      );
+      return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
     }
 
-    if (!reports || reports.length === 0) {
-      return NextResponse.json(
-        {
-          found: false,
-          target: target.trim(),
-          report_count: 0,
-          message: "No reports found for this target",
-        },
-        { status: 200, headers }
-      );
-    }
-
-    // Aggregate stats
-    const totalReports = reports.length;
-    const avgConfidence = Math.round(
-      reports.reduce((sum, r) => sum + (r.ai_confidence || 0), 0) / totalReports
+    const totalScamVotes = ((reports ?? []) as any[]).reduce(
+      (sum: number, r: any) => sum + (r.community_scam_votes ?? 0), 0
     );
-    const totalScamVotes = reports.reduce(
-      (sum, r) => sum + (r.community_scam_votes || 0),
-      0
+    const totalGenuineVotes = ((reports ?? []) as any[]).reduce(
+      (sum: number, r: any) => sum + (r.community_genuine_votes ?? 0), 0
     );
-    const totalGenuineVotes = reports.reduce(
-      (sum, r) => sum + (r.community_genuine_votes || 0),
-      0
-    );
-
-    // Count verdicts
-    const verdicts = {
-      LIKELY_SCAM: reports.filter((r) => r.ai_verdict === "LIKELY_SCAM").length,
-      LIKELY_GENUINE: reports.filter((r) => r.ai_verdict === "LIKELY_GENUINE").length,
-      UNCERTAIN: reports.filter((r) => r.ai_verdict === "UNCERTAIN").length,
-    };
+    const scamReports = ((reports ?? []) as any[]).filter((r: any) => r.ai_verdict === "LIKELY_SCAM").length;
+    const verifiedReports = ((reports ?? []) as any[]).filter((r: any) => r.status === "VERIFIED").length;
 
     return NextResponse.json(
       {
-        found: true,
-        target: target.trim(),
-        report_count: totalReports,
-        avg_confidence: avgConfidence,
-        total_scam_votes: totalScamVotes,
-        total_genuine_votes: totalGenuineVotes,
-        verdicts,
-        latest_reports: reports.slice(0, 5).map((r) => ({
-          id: r.id,
-          title: r.title,
-          category: r.category,
-          ai_verdict: r.ai_verdict,
-          ai_confidence: r.ai_confidence,
-          status: r.status,
-          created_at: r.created_at,
-        })),
+        query,
+        total: reports?.length ?? 0,
+        reports: reports ?? [],
+        summary: {
+          scam_reports: scamReports,
+          verified_reports: verifiedReports,
+          total_scam_votes: totalScamVotes,
+          total_genuine_votes: totalGenuineVotes,
+          risk_level:
+            scamReports > 2 ? "HIGH" : scamReports > 0 ? "MEDIUM" : "LOW",
+        },
       },
       {
-        status: 200,
         headers: {
-          ...headers,
           "X-RateLimit-Remaining": String(rateLimitResult.remaining),
+          "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
         },
       }
     );
   } catch (err) {
-    console.error("[/api/lookup] Unexpected error:", err);
-    return NextResponse.json(
-      { error: "Internal error" },
-      { status: 500, headers }
-    );
+    console.error("[/api/lookup] Unexpected error:", err instanceof Error ? err.message : err);
+    return NextResponse.json({ error: "Lookup failed" }, { status: 500 });
   }
-}
-
-// Handle CORS preflight
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
-  });
 }

@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/useAuth";
 import {
   POST_CATEGORIES,
   CATEGORY_COLORS,
+  MOCK_COMMUNITY_POSTS,
   type CommunityPost,
 } from "@/lib/communityData";
 
@@ -34,33 +35,31 @@ export default function CommunityPage() {
   const { user } = useAuth();
   const supabase = createClient();
 
-  // Load feed posts
+  // Load feed posts — real data from posts table, with mock fallback
   async function loadPosts() {
     setLoading(true);
-    // Fetch posts, counting comments for each post
-    const { data: postsData, error } = await supabase
-      .from("posts")
-      .select("*, profiles(username)");
+    try {
+      const { data: postsData, error } = await supabase
+        .from("posts")
+        .select("*, profiles(username)")
+        .order("created_at", { ascending: false })
+        .limit(50);
 
-    if (!error && postsData) {
-      // For each post, fetch comments count
-      const postsWithCounts = await Promise.all(
-        postsData.map(async (post: any) => {
-          const { count } = await supabase
-            .from("post_comments")
-            .select("*", { count: "exact", head: true })
-            .eq("post_id", post.id);
-          
-          return {
-            ...post,
-            username: post.profiles?.username || "anonymous",
-            avatar_initial: (post.profiles?.username?.[0] || "a").toUpperCase(),
-            avatar_color: "#4c63d2",
-            comment_count: count || 0,
-          };
-        })
-      );
-      setPosts(postsWithCounts);
+      if (!error && postsData && postsData.length > 0) {
+        const postsWithCounts = postsData.map((post: any) => ({
+          ...post,
+          username: post.profiles?.username || "anonymous",
+          avatar_initial: (post.profiles?.username?.[0] || "a").toUpperCase(),
+          avatar_color: "#4c63d2",
+          comment_count: 0, // comments are under reports, not posts
+        }));
+        setPosts(postsWithCounts);
+      } else {
+        // Fallback to mock data if table is empty or doesn't exist yet
+        setPosts(MOCK_COMMUNITY_POSTS);
+      }
+    } catch {
+      setPosts(MOCK_COMMUNITY_POSTS);
     }
     setLoading(false);
   }

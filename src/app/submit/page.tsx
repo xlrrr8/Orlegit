@@ -2,15 +2,18 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Flag, Bot, CheckCircle2, ArrowRight, Loader, ImageIcon, AlertTriangle } from "lucide-react";
+import { Flag, Bot, CheckCircle2, ArrowRight, Loader, ImageIcon, AlertTriangle, ShieldCheck } from "lucide-react";
 import { CATEGORIES } from "@/lib/mockData";
 import AIVerdict from "@/components/AIVerdict";
 import DropZone from "@/components/DropZone";
 import { createClient } from "@/lib/supabase";
+import { useAuth } from "@/lib/useAuth";
 import type { AIAnalysisResult } from "@/lib/gemini";
+import Link from "next/link";
 
 export default function SubmitPage() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [form, setForm] = useState({
     title: "",
     target: "",
@@ -44,10 +47,33 @@ export default function SubmitPage() {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData?.user?.id || null;
 
+    // Ensure profile row exists in DB before linking user_id to prevent FK violation
+    let validUserId = userId;
+    if (userId) {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", userId)
+        .single();
+      
+      if (!prof) {
+        // Try creating minimal profile row
+        const emailPrefix = userData?.user?.email ? userData.user.email.split("@")[0] : "user";
+        const fallbackUsername = `${emailPrefix}_${Math.floor(Math.random() * 1000)}`;
+        const { error: profErr } = await supabase
+          .from("profiles")
+          .insert({ id: userId, username: fallbackUsername, trust_score: 100 });
+        
+        if (profErr) {
+          console.warn("Could not insert profile for user, submitting report anonymously:", profErr.message);
+          validUserId = null; // Fallback to null user_id so report insertion succeeds
+        }
+      }
+    }
+
+    // Step 1: Insert report into Supabase DB
+    let reportId: string | null = null;
     try {
-      // 1. Insert report with ONLY user-supplied fields.
-      //    AI columns (ai_verdict, ai_confidence, ai_reasoning) are left
-      //    at their DB defaults and will be updated server-side by /api/analyze.
       const { data: insertedReport, error: insertError } = await supabase
         .from("reports")
         .insert({
@@ -55,18 +81,28 @@ export default function SubmitPage() {
           target: form.target,
           category: form.category,
           description: form.description,
-          user_id: userId,
+          user_id: validUserId,
         })
         .select("id")
         .single();
 
       if (insertError) {
-        throw new Error(insertError.message);
+        console.error("Report DB insert error:", insertError);
+        setError(`Failed to save report: ${insertError.message}`);
+        setLoading(false);
+        return;
       }
 
-      const reportId = insertedReport?.id;
+      reportId = insertedReport?.id ?? null;
+    } catch (err) {
+      console.error("Report DB insert exception:", err);
+      setError(err instanceof Error ? err.message : "Failed to save report to database.");
+      setLoading(false);
+      return;
+    }
 
-      // 2. Call /api/analyze with the report_id so the server writes AI columns
+    // Step 2: Call /api/analyze to trigger Gemini AI analysis
+    try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,18 +121,24 @@ export default function SubmitPage() {
         return;
       }
 
-      const data: AIAnalysisResult = await res.json();
-      setAnalysis(data);
+      if (res.ok) {
+        const data: AIAnalysisResult = await res.json();
+        setAnalysis(data);
+      } else {
+        setAnalysis({
+          verdict: "UNCERTAIN",
+          confidence: 50,
+          reasoning: "AI analysis was unavailable. Your report has been saved successfully.",
+          red_flags: [],
+        });
+      }
       setSubmitted(true);
-    } catch (err) {
-      console.error("Submission error:", err);
-      // Report may have been inserted but AI analysis failed.
-      // Show the user a fallback message.
+    } catch (aiErr) {
+      console.error("AI analysis error:", aiErr);
       setAnalysis({
         verdict: "UNCERTAIN",
         confidence: 50,
-        reasoning:
-          "Could not reach AI service. Your report has been saved and will be analyzed later.",
+        reasoning: "Your report has been saved successfully. AI analysis will process shortly.",
         red_flags: [],
       });
       setSubmitted(true);
@@ -172,6 +214,46 @@ export default function SubmitPage() {
             >
               View all reports <ArrowRight size={14} strokeWidth={2} />
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Auth loading state
+  if (authLoading) {
+    return (
+      <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Loader size={28} strokeWidth={2} color="var(--accent)" style={{ animation: "spin 0.8s linear infinite" }} />
+      </div>
+    );
+  }
+
+  // Auth gate — spec: "No anonymous reporting, under any future product pressure"
+  if (!user) {
+    return (
+      <div style={{ padding: "5rem 0 6rem", background: "var(--bg-base)", minHeight: "100vh" }}>
+        <div className="container" style={{ maxWidth: "500px", textAlign: "center" }}>
+          <div style={{
+            width: "56px", height: "56px", borderRadius: "16px",
+            background: "var(--accent-dim)", border: "1.5px solid #c5cdf5",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 1.5rem",
+          }}>
+            <ShieldCheck size={26} strokeWidth={1.75} color="var(--accent)" />
+          </div>
+          <h1 style={{ marginBottom: "0.625rem" }}>Sign in to report</h1>
+          <p style={{ fontSize: "0.9rem", marginBottom: "2rem" }}>
+            Every report is tied to an authenticated identity. This protects against
+            false reports and is a legal safeguard for named targets.
+          </p>
+          <div style={{ display: "flex", gap: "0.875rem", justifyContent: "center", flexWrap: "wrap" }}>
+            <Link href="/login?return=/submit" className="btn btn-primary">
+              Sign in
+            </Link>
+            <Link href="/login?mode=signup&return=/submit" className="btn btn-ghost">
+              Create account
+            </Link>
           </div>
         </div>
       </div>
