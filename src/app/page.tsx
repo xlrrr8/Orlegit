@@ -16,28 +16,33 @@ export default async function HomePage() {
   try {
     const resTotal = await supabase
       .from("reports")
-      .select("*", { count: "exact", head: true });
+      .select("*", { count: "exact", head: true })
+      .neq("status", "REMOVED");
     totalReports = resTotal.count;
 
     const resScams = await supabase
       .from("reports")
       .select("*", { count: "exact", head: true })
-      .eq("ai_verdict", "LIKELY_SCAM");
+      .eq("ai_verdict", "LIKELY_SCAM")
+      .neq("status", "REMOVED");
     scamsVerified = resScams.count;
 
     const resGenuine = await supabase
       .from("reports")
       .select("*", { count: "exact", head: true })
-      .eq("ai_verdict", "LIKELY_GENUINE");
+      .eq("ai_verdict", "LIKELY_GENUINE")
+      .neq("status", "REMOVED");
     genuineVerified = resGenuine.count;
 
     const resReports = await supabase
       .from("reports")
       .select("*, profiles(username)")
       .eq("ai_verdict", "LIKELY_SCAM")
+      .neq("status", "REMOVED")
       .order("created_at", { ascending: false })
       .limit(3);
     rawReports = resReports.data;
+
   } catch (err) {
     console.error("Supabase home page query error:", err);
   }

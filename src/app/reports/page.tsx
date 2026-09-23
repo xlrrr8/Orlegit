@@ -23,6 +23,7 @@ export default function ReportsPage() {
         const { data, error } = await supabase
           .from("reports")
           .select("*, profiles(username)")
+          .neq("status", "REMOVED")
           .order("created_at", { ascending: false });
 
         if (!error && data && data.length > 0) {

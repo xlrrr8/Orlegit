@@ -1,12 +1,13 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { notFound } from "next/navigation";
-import { Flag, CheckCircle2, AlertTriangle, Share2, ChevronRight, User, Clock, MessageSquare, Loader, ShieldAlert, Info, X } from "lucide-react";
+import { useRouter, notFound } from "next/navigation";
+import { Flag, CheckCircle2, AlertTriangle, Share2, ChevronRight, User, Clock, MessageSquare, Loader, ShieldAlert, Info, X, Trash2, ImageIcon, ExternalLink } from "lucide-react";
 import { categoryInfo, timeAgo, getScamScore } from "@/lib/mockData";
 import AIVerdict from "@/components/AIVerdict";
 import VoteButtons from "@/components/VoteButtons";
 import { createClient } from "@/lib/supabase";
+import { useAuth } from "@/lib/useAuth";
 import Link from "next/link";
 
 interface Props {
@@ -23,6 +24,8 @@ const DISPUTE_REASONS = [
 
 export default function ReportPage({ params }: Props) {
   const { id } = use(params);
+  const router = useRouter();
+  const { user, profile } = useAuth();
   const [report, setReport] = useState<any | null>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +41,30 @@ export default function ReportPage({ params }: Props) {
   const [submittingDispute, setSubmittingDispute] = useState(false);
   const [disputeSubmitted, setDisputeSubmitted] = useState(false);
 
+  // Deletion state
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
   const supabase = createClient();
+
+  const handleDeleteReport = async () => {
+    if (deleting || !report) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const { error } = await supabase.from("reports").delete().eq("id", report.id);
+      if (error) {
+        setDeleteError(error.message);
+        setDeleting(false);
+        return;
+      }
+      router.push("/reports");
+    } catch (err: any) {
+      setDeleteError(err?.message || "Failed to delete report.");
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -309,6 +335,57 @@ export default function ReportPage({ params }: Props) {
 
               <p style={{ lineHeight: 1.8, fontSize: "0.9rem" }}>{report.description}</p>
 
+              {/* Evidence Gallery */}
+              {report.evidence_urls && report.evidence_urls.length > 0 && (
+                <div style={{
+                  marginTop: "1.25rem",
+                  paddingTop: "1.25rem",
+                  borderTop: "1px solid var(--border)",
+                }}>
+                  <h4 style={{ fontSize: "0.85rem", color: "var(--text-primary)", marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <ImageIcon size={14} strokeWidth={2} color="var(--accent)" />
+                    Evidence &amp; Screenshots ({report.evidence_urls.length})
+                  </h4>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "0.75rem" }}>
+                    {report.evidence_urls.map((url: string, index: number) => (
+                      <a
+                        key={index}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          position: "relative",
+                          aspectRatio: "16/10",
+                          borderRadius: "var(--radius-md)",
+                          overflow: "hidden",
+                          border: "1.5px solid var(--border)",
+                          background: "var(--bg-input)",
+                          display: "block",
+                          cursor: "pointer",
+                          transition: "transform 0.15s ease, border-color 0.15s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)";
+                          (e.currentTarget as HTMLElement).style.transform = "scale(1.02)";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                          (e.currentTarget as HTMLElement).style.transform = "scale(1)";
+                        }}
+                        title="Click to view full image in new tab"
+                      >
+                        <img
+                          src={url}
+                          alt={`Evidence screenshot ${index + 1}`}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: "flex", gap: "1.25rem", marginTop: "1.125rem", flexWrap: "wrap" }}>
                 <span style={{ display: "flex", alignItems: "center", gap: "0.3rem", fontSize: "0.78rem", color: "var(--text-muted)" }}>
                   <User size={12} strokeWidth={1.75} />
@@ -432,6 +509,22 @@ export default function ReportPage({ params }: Props) {
               Share report
             </button>
 
+            {/* Owner or Moderator/Admin Delete Button */}
+            {((user && report && user.id === report.user_id) || (profile && ["moderator", "admin"].includes(profile.role))) && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowDeleteModal(true)}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", gap: "0.4rem",
+                  justifyContent: "center", color: "var(--scam)",
+                  borderColor: "var(--scam-border)", background: "var(--scam-dim)",
+                }}
+              >
+                <Trash2 size={13} strokeWidth={1.75} />
+                Delete report
+              </button>
+            )}
+
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setShowDisputeForm(true)}
@@ -447,6 +540,87 @@ export default function ReportPage({ params }: Props) {
           </div>
         </div>
       </div>
+
+      {/* ===== DELETE CONFIRMATION MODAL ===== */}
+      {showDeleteModal && (
+        <div
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000, padding: "1rem",
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deleting) setShowDeleteModal(false);
+          }}
+        >
+          <div style={{
+            background: "var(--bg-surface)", border: "1.5px solid var(--border)",
+            borderRadius: "var(--radius-xl)", padding: "2rem",
+            maxWidth: "440px", width: "100%", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)",
+            animation: "fadeInUp 0.3s ease both",
+            position: "relative",
+          }}>
+            <button
+              onClick={() => !deleting && setShowDeleteModal(false)}
+              style={{
+                position: "absolute", top: "1rem", right: "1rem",
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--text-muted)", padding: "0.25rem",
+              }}
+              disabled={deleting}
+            >
+              <X size={18} strokeWidth={2} />
+            </button>
+
+            <div style={{
+              width: "48px", height: "48px", borderRadius: "12px",
+              background: "var(--scam-dim)", border: "1.5px solid var(--scam-border)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              margin: "0 auto 1.25rem",
+            }}>
+              <Trash2 size={22} strokeWidth={1.75} color="var(--scam)" />
+            </div>
+
+            <h3 style={{ textAlign: "center", marginBottom: "0.5rem" }}>Delete report?</h3>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", textAlign: "center", marginBottom: "1.5rem" }}>
+              Are you sure you want to delete <strong>&ldquo;{report.title}&rdquo;</strong>? This action cannot be undone and will remove all votes and comments associated with this report.
+            </p>
+
+            {deleteError && (
+              <div style={{
+                background: "var(--scam-dim)", border: "1.5px solid var(--scam-border)",
+                borderRadius: "var(--radius-md)", padding: "0.75rem 1rem",
+                fontSize: "0.82rem", color: "var(--scam)", marginBottom: "1.25rem",
+              }}>
+                {deleteError}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center" }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={handleDeleteReport}
+                disabled={deleting}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "0.4rem" }}
+              >
+                {deleting ? (
+                  <><Loader size={14} strokeWidth={2} style={{ animation: "spin 0.8s linear infinite" }} /> Deleting…</>
+                ) : (
+                  <><Trash2 size={14} strokeWidth={2} /> Delete</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== DISPUTE MODAL ===== */}
       {showDisputeForm && (

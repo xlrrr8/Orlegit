@@ -12,7 +12,7 @@
 | **Language** | **TypeScript** | Strict type safety across client & server models |
 | **Backend & Database** | **Supabase (PostgreSQL)** | Relational database, Row Level Security (RLS) policies, triggers |
 | **Authentication** | **Supabase Auth (`@supabase/ssr`)** | Real Email/Password auth, Google OAuth, RLS user session tokens |
-| **AI Engine** | **Google Gemini AI (`@google/generative-ai`)** | Powered by `gemini-1.5-flash` model for real-time scam analysis |
+| **AI Engine** | **Google Gemini AI (`@google/generative-ai`)** | Powered by `gemini-3.6-flash` model for real-time scam analysis |
 | **Icons & Styling** | **Lucide React & CSS Variables** | Glassmorphism UI, custom CSS design system, responsive design |
 
 ---
@@ -29,8 +29,10 @@ flowchart TD
         NextApp --> SubmitPage["Submit Scam Report (/submit)"]
         NextApp --> ReportsPage["Reports Directory (/reports)"]
         NextApp --> FeedPage["Community Feed (/feed)"]
+        NextApp --> ModeratePage["Moderator Dashboard (/moderate)"]
         NextApp --> AccountPage["User Account (/account)"]
         NextApp --> LoginPage["Auth Sign In / Up (/login)"]
+        NextApp --> LegalPages["Privacy & Terms (/privacy, /terms)"]
     end
     
     subgraph Authentication & State
@@ -39,9 +41,10 @@ flowchart TD
 
     subgraph Data & AI Services
         NextApp <--> SupabaseDB[(Supabase PostgreSQL Database)]
-        SubmitPage --> GeminiAPI[Google Gemini 1.5 Flash AI]
+        SubmitPage --> GeminiAPI[Google Gemini 3.6 Flash AI]
     end
 ```
+
 
 ---
 

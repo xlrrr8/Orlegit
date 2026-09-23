@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Flag, Bot, CheckCircle2, ArrowRight, Loader, ImageIcon, AlertTriangle, ShieldCheck } from "lucide-react";
 import { CATEGORIES } from "@/lib/mockData";
@@ -21,11 +21,24 @@ export default function SubmitPage() {
     description: "",
   });
   const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
+  const [evidenceUrls, setEvidenceUrls] = useState<string[]>([]);
+  const [accessToken, setAccessToken] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [analysis, setAnalysis] = useState<AIAnalysisResult | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateCount, setDuplicateCount] = useState(0);
+
+  useEffect(() => {
+    async function fetchToken() {
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        setAccessToken(data.session.access_token);
+      }
+    }
+    fetchToken();
+  }, [user]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -33,6 +46,10 @@ export default function SubmitPage() {
 
   const handleImagesChange = useCallback((files: File[]) => {
     setEvidenceFiles(files);
+  }, []);
+
+  const handleUploadComplete = useCallback((url: string) => {
+    setEvidenceUrls((prev) => [...prev, url]);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -82,6 +99,7 @@ export default function SubmitPage() {
           category: form.category,
           description: form.description,
           user_id: validUserId,
+          evidence_urls: evidenceUrls,
         })
         .select("id")
         .single();
@@ -380,7 +398,13 @@ export default function SubmitPage() {
                   — optional but helps AI accuracy
                 </span>
               </label>
-              <DropZone onImagesChange={handleImagesChange} maxFiles={5} />
+              <DropZone
+                onImagesChange={handleImagesChange}
+                maxFiles={5}
+                uploadToStorage={!!accessToken}
+                accessToken={accessToken}
+                onUploadComplete={handleUploadComplete}
+              />
             </div>
 
           </div>

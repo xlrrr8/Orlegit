@@ -61,7 +61,10 @@ function SearchContent() {
 
     // 1. Query Supabase
     try {
-      let req = supabase.from("reports").select("*, profiles(username)");
+      let req = supabase
+        .from("reports")
+        .select("*, profiles(username)")
+        .neq("status", "REMOVED");
 
       if (catFilter !== "all") {
         req = req.eq("category", catFilter);

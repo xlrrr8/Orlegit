@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   User, Mail, Shield, Calendar, Award, Edit3,
   LogOut, Loader, Check, FileText, MessageCircle,
-  ChevronRight, ShieldCheck,
+  ChevronRight, ShieldCheck, Trash2,
 } from "lucide-react";
 import { useAuth } from "@/lib/useAuth";
 import { createClient } from "@/lib/supabase";
@@ -24,6 +24,23 @@ export default function AccountPage() {
   const [myReports, setMyReports] = useState<any[]>([]);
   const [postCount, setPostCount] = useState<number>(0);
   const [dataLoading, setDataLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDeleteReport = async (reportId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this report? This action cannot be undone.")) return;
+
+    setDeletingId(reportId);
+    const supabase = createClient();
+    const { error } = await supabase.from("reports").delete().eq("id", reportId);
+    if (!error) {
+      setMyReports((prev) => prev.filter((r) => r.id !== reportId));
+    } else {
+      alert("Failed to delete report: " + error.message);
+    }
+    setDeletingId(null);
+  };
 
   useEffect(() => {
     if (!loading && !user) {
@@ -237,7 +254,7 @@ export default function AccountPage() {
               </div>
 
               {/* Member since */}
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.78rem", color: "var(--text-muted)" }} suppressHydrationWarning>
                 <Calendar size={12} strokeWidth={1.75} />
                 Member since {memberSince}
               </div>
@@ -347,7 +364,27 @@ export default function AccountPage() {
                           Target: <code style={{ fontSize: "0.72rem" }}>{report.target}</code>
                         </p>
                       </div>
-                      <ChevronRight size={16} strokeWidth={1.75} color="var(--text-muted)" />
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteReport(report.id, e)}
+                          disabled={deletingId === report.id}
+                          style={{
+                            background: "var(--scam-dim)", border: "1px solid var(--scam-border)",
+                            borderRadius: "var(--radius-sm)", padding: "0.35rem",
+                            color: "var(--scam)", cursor: "pointer", display: "flex",
+                            alignItems: "center", justifyContent: "center",
+                          }}
+                          title="Delete report"
+                        >
+                          {deletingId === report.id ? (
+                            <Loader size={13} strokeWidth={2} style={{ animation: "spin 0.8s linear infinite" }} />
+                          ) : (
+                            <Trash2 size={13} strokeWidth={1.75} />
+                          )}
+                        </button>
+                        <ChevronRight size={16} strokeWidth={1.75} color="var(--text-muted)" />
+                      </div>
                     </div>
                   </Link>
                 );

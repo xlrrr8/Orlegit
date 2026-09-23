@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
   ChevronRight, Heart, MessageCircle, Share2, CheckCircle2,
-  Clock, Flag, Send, ThumbsUp, Loader,
+  Clock, Flag, Send, ThumbsUp, Loader, ImageIcon,
 } from "lucide-react";
 import { CATEGORY_COLORS } from "@/lib/communityData";
 import { timeAgo } from "@/lib/mockData";
@@ -263,6 +263,53 @@ export default function CommunityPostPage({ params }: { params: Promise<{ id: st
                   </p>
                 ))}
               </div>
+
+              {/* Attached Screenshots / Images */}
+              {post.image_urls && post.image_urls.length > 0 && (
+                <div style={{ marginTop: "1.5rem", paddingTop: "1.25rem", borderTop: "1px solid var(--border)" }}>
+                  <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", fontWeight: 500, marginBottom: "0.75rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <ImageIcon size={14} strokeWidth={2} color="var(--accent)" />
+                    Attached Screenshots &amp; Evidence ({post.image_urls.length})
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "0.75rem" }}>
+                    {post.image_urls.map((url: string, index: number) => (
+                      <a
+                        key={index}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          position: "relative",
+                          aspectRatio: "16/10",
+                          borderRadius: "var(--radius-md)",
+                          overflow: "hidden",
+                          border: "1.5px solid var(--border)",
+                          background: "var(--bg-input)",
+                          display: "block",
+                          cursor: "pointer",
+                          transition: "transform 0.15s ease, border-color 0.15s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          (e.currentTarget as HTMLElement).style.borderColor = "var(--accent)";
+                          (e.currentTarget as HTMLElement).style.transform = "scale(1.02)";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLElement).style.borderColor = "var(--border)";
+                          (e.currentTarget as HTMLElement).style.transform = "scale(1)";
+                        }}
+                        title="Click to view full image in new tab"
+                      >
+                        <img
+                          src={url}
+                          alt={`Post screenshot ${index + 1}`}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Tags */}
               {post.tags && post.tags.length > 0 && (

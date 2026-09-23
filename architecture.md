@@ -12,7 +12,7 @@
 | Frontend | Next.js App Router | 15.5 | SSR + Client pages |
 | Language | TypeScript | 5.8 | Full-stack type safety |
 | Auth + DB | Supabase | 2.x | PostgreSQL + Auth + RLS |
-| AI | Google Gemini | 2.0-flash | Scam verdict analysis |
+| AI | Google Gemini | 3.6-flash | Scam verdict analysis |
 | Styling | Vanilla CSS | — | Design system via CSS variables |
 | Hosting | Vercel (implied) | — | Edge + Serverless |
 
@@ -349,31 +349,45 @@ src/
 │   ├── page.tsx                  # Landing — hero + stats + recent reports
 │   ├── reports/
 │   │   ├── page.tsx              # Report list + search/filter
-│   │   └── [id]/page.tsx         # Report detail + voting + comments + dispute
-│   ├── submit/page.tsx           # Report submission form + AI analysis
+│   │   └── [id]/page.tsx         # Report detail + voting + comments + dispute + evidence gallery
+│   ├── submit/page.tsx           # Report submission form + AI analysis + DropZone upload
 │   ├── search/page.tsx           # Dedicated search page
-│   ├── feed/page.tsx             # Community discussion feed
+│   ├── feed/
+│   │   ├── page.tsx              # Community discussion feed
+│   │   └── [id]/page.tsx         # Thread detail + post evidence gallery
 │   ├── account/page.tsx          # User account / profile
 │   ├── dashboard/page.tsx        # Stats dashboard
+│   ├── moderate/page.tsx         # Moderator & Admin dashboard
 │   ├── login/page.tsx            # Auth (sign in / sign up)
+│   ├── privacy/page.tsx          # Privacy Policy
+│   ├── terms/page.tsx            # Terms of Service
 │   └── api/
 │       ├── analyze/route.ts      # Gemini AI analysis endpoint
-│       └── lookup/route.ts       # Public read API
+│       ├── lookup/route.ts       # Public read API
+│       ├── moderate/[action]/    # Server-side moderation actions
+│       └── upload/route.ts       # Evidence upload to Supabase Storage
 │
 ├── components/
 │   ├── AuthProvider.tsx          # Supabase session context
-│   ├── Navbar.tsx                # Navigation
+│   ├── Navbar.tsx                # Navigation (with moderator link)
 │   ├── AIVerdict.tsx             # Verdict display card
 │   ├── ReportCard.tsx            # Report list item
 │   ├── VoteBar.tsx               # Community vote progress bar
-│   ├── DropZone.tsx              # Evidence upload (type + size validated)
-│   └── PostCard.tsx              # Community feed post
+│   ├── VoteButtons.tsx           # Interactive authenticated voting
+│   ├── ModerationActions.tsx     # Moderator decision actions
+│   ├── DropZone.tsx              # Evidence upload (MIME + size validated)
+│   ├── PostCard.tsx              # Community feed post
+│   └── Footer.tsx                # Footer with compliance links
 │
 └── lib/
-    ├── gemini.ts                 # AI analysis (Gemini 2.0 Flash)
+    ├── ai/
+    │   └── modelConfig.ts        # Gemini model ID configuration
+    ├── gemini.ts                 # AI analysis (Gemini 3.6 Flash)
     ├── supabase.ts               # Anon client (browser)
-    ├── supabase-server.ts        # Service role client (server only) ← NEW
-    ├── rateLimit.ts              # Sliding-window rate limiter ← NEW
+    ├── supabase-server.ts        # Service role client (server only)
+    ├── rateLimit.ts              # Sliding-window rate limiter
+    ├── rateLimitRedis.ts         # Redis-backed rate limiter with memory fallback
+    ├── redis.ts                  # Upstash Redis client
     ├── mockData.ts               # Types, categories, helper functions
     └── useAuth.ts                # Auth context hook
 ```
@@ -404,10 +418,10 @@ src/
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Rate limiter persistence | In-memory only | Works for single-instance; replace with Redis/Upstash for multi-region Vercel |
-| Evidence file upload | DropZone validated, not uploaded | Wire to Supabase Storage with signed URLs |
-| Vote trust weighting | Schema ready | `fn_cast_vote` has weight calc; trust_score needs production data to be meaningful |
+| Rate limiter persistence | Redis / In-memory | Supports Upstash Redis with automatic in-memory fallback for local dev |
+| Evidence file upload | Complete | Wired to `/api/upload` (private storage bucket) with gallery rendering in reports & feed |
+| Vote trust weighting | Schema ready | `fn_cast_vote` / trigger has weight calc; trust_score tracks moderation outcomes |
 | Full-text search via tsvector | pg_trgm implemented | Can upgrade to `tsvector` generated column for even better CJK/multilingual support |
-| Moderator dashboard UI | Backend ready | `role` column + `report_moderation_log` exist; no admin UI yet |
+| Moderator dashboard UI | Complete | Fully implemented at `/moderate` with role-based checks and moderation log audit |
 | Browser extension | Architecture ready | Public `/api/lookup` can power extension; extension itself not built |
 | Anonymous reporting | Blocked by Migration 001 | Policy can be relaxed to `auth.uid() IS NOT NULL OR true` if needed |

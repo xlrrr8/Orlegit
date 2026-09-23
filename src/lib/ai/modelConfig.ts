@@ -9,7 +9,8 @@
  * Check https://ai.google.dev/gemini-api/docs/models before changing.
  */
 export const GEMINI_MODEL =
-  process.env.GEMINI_MODEL_ID ?? "gemini-2.0-flash";
+  process.env.GEMINI_MODEL_ID ?? "gemini-3.6-flash";
 
 export const GEMINI_FALLBACK_MODEL =
-  process.env.GEMINI_FALLBACK_MODEL_ID ?? "gemini-1.5-flash";
+  process.env.GEMINI_FALLBACK_MODEL_ID ?? "gemini-2.5-flash";
+

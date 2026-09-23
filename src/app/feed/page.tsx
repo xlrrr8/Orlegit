@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { PenLine, X, ImageIcon, Loader, TrendingUp, Clock, MessageCircle, Flame } from "lucide-react";
 import PostCard from "@/components/PostCard";
 import DropZone from "@/components/DropZone";
@@ -17,12 +18,15 @@ type FilterTab = "all" | CommunityPost["category"];
 type SortBy = "latest" | "popular" | "most_discussed";
 
 export default function CommunityPage() {
+  const router = useRouter();
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [sortBy, setSortBy] = useState<SortBy>("latest");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [postImages, setPostImages] = useState<File[]>([]);
+  const [postImageUrls, setPostImageUrls] = useState<string[]>([]);
+  const [accessToken, setAccessToken] = useState<string | undefined>(undefined);
   const [postForm, setPostForm] = useState({
     title: "",
     content: "",
@@ -31,9 +35,20 @@ export default function CommunityPage() {
   });
   const [posting, setPosting] = useState(false);
   const [posted, setPosted] = useState(false);
+  const [postError, setPostError] = useState<string | null>(null);
 
   const { user } = useAuth();
   const supabase = createClient();
+
+  useEffect(() => {
+    async function fetchToken() {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        setAccessToken(data.session.access_token);
+      }
+    }
+    fetchToken();
+  }, [user, supabase.auth]);
 
   // Load feed posts — real data from posts table, with mock fallback
   async function loadPosts() {
@@ -80,7 +95,12 @@ export default function CommunityPage() {
   const handlePostSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!postForm.title || !postForm.content) return;
+    if (!user) {
+      setPostError("You must be signed in to post to the community feed.");
+      return;
+    }
     setPosting(true);
+    setPostError(null);
 
     try {
       const tagsArray = postForm.tags
@@ -94,7 +114,8 @@ export default function CommunityPage() {
           content: postForm.content,
           category: postForm.category,
           tags: tagsArray,
-          user_id: user?.id || null,
+          image_urls: postImageUrls,
+          user_id: user.id,
         })
         .select()
         .single();
@@ -104,11 +125,15 @@ export default function CommunityPage() {
         setShowCreateModal(false);
         setPostForm({ title: "", content: "", category: "experience", tags: "" });
         setPostImages([]);
+        setPostImageUrls([]);
         loadPosts(); // reload feed
         setTimeout(() => setPosted(false), 3500);
+      } else if (error) {
+        setPostError(error.message);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to post:", err);
+      setPostError(err?.message || "Failed to post.");
     } finally {
       setPosting(false);
     }
@@ -155,7 +180,13 @@ export default function CommunityPage() {
             </div>
             <button
               className="btn btn-primary"
-              onClick={() => setShowCreateModal(true)}
+              onClick={() => {
+                if (!user) {
+                  router.push("/login?return=/feed");
+                } else {
+                  setShowCreateModal(true);
+                }
+              }}
               style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
             >
               <PenLine size={14} strokeWidth={2} />
@@ -436,7 +467,18 @@ export default function CommunityPage() {
                   Upload screenshots / evidence
                   <span style={{ fontWeight: 400, color: "var(--text-muted)", fontSize: "0.78rem" }}>— optional</span>
                 </label>
-                <DropZone onImagesChange={handleImagesChange} maxFiles={8} />
+                <DropZone
+                  onImagesChange={handleImagesChange}
+                  maxFiles={8}
+                  uploadToStorage={!!accessToken}
+                  accessToken={accessToken}
+                  onUploadComplete={(url) => setPostImageUrls((prev) => [...prev, url])}
+                />
+                {postError && (
+                  <p style={{ color: "var(--scam)", fontSize: "0.8rem", marginTop: "0.5rem" }}>
+                    {postError}
+                  </p>
+                )}
               </div>
 
               <div className="form-group">

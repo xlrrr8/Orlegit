@@ -79,7 +79,23 @@ const SEED_POSTS = [
 
 async function seed() {
   console.log("Seeding feed posts...");
-  const { data: posts, error } = await supabase.from("posts").insert(SEED_POSTS).select();
+
+  // Fetch an existing profile to satisfy the foreign key & NOT NULL constraint
+  let authorId = null;
+  const { data: existingProfiles } = await supabase.from("profiles").select("id").limit(1);
+  if (existingProfiles && existingProfiles.length > 0) {
+    authorId = existingProfiles[0].id;
+    console.log(`Linking seeded posts to profile: ${authorId}`);
+  } else {
+    console.warn("Notice: No profile found in database. If 'user_id' is NOT NULL, ensure at least one profile exists before seeding.");
+  }
+
+  const postsToInsert = SEED_POSTS.map((p) => ({
+    ...p,
+    ...(authorId ? { user_id: authorId } : {}),
+  }));
+
+  const { data: posts, error } = await supabase.from("posts").insert(postsToInsert).select();
   if (error) {
     console.error("Error seeding posts:", error.message);
     process.exit(1);
